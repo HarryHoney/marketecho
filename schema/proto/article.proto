@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package article;
+option go_package = "./news-fetcher/internal/model";
+
+message Article {
+  string id = 1;
+  string title = 2;
+  string description = 3;
+  string content = 4;
+  string source = 5;
+}
+
+message ArticleList {
+  repeated Article articles = 1;
+}

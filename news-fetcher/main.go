@@ -22,6 +22,30 @@ func main() {
 
 	var wg sync.WaitGroup
 	// Handle news from NewsDataIO
+	fetchFromNewsDataIO(configs, normalisedNewsfeed, &wg)
+
+	// Close the channel when all workers (fetchers) are done.
+	go func() {
+		wg.Wait()
+		// Close the channel to signal that no more articles will be sent. Receive is opened until all articles are processed.
+		close(normalisedNewsfeed)
+	}()
+
+	// This loop will stay active as long as fetchers are sending data.
+	// It will only exit once the channel is closed by the goroutine above.
+	// This range on news channel is making the main goroutine wait for all articles to be processed before exiting.
+	// In golang, ranging over a channel will block until the channel is closed, so this ensures we process all articles before exiting.
+	for article := range normalisedNewsfeed {
+		fmt.Println("Received:", article.Title)
+		// TODO: Here you would typically send the article to your pubsub system.
+	}
+
+	// 3. Only after the loop finishes is the program truly done.
+	fmt.Println("All articles processed. Exiting.")
+}
+
+func fetchFromNewsDataIO(configs *dao.NewsProviderConfigs, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {
+	// Handle news from NewsDataIO
 	for _, config := range configs.GetNewsdataIOConfigs() {
 		fmt.Printf("Processing config: %+v\n", config)
 		// Here you would initialize your provider and start fetching
@@ -37,21 +61,6 @@ func main() {
 		}
 		wg.Add(1)
 		// Start fetcher in a goroutine with a 10-second rate limit
-		go fetcher.StartFetching(context.Background(), p, 10*time.Second, normalisedNewsfeed, &wg)
+		go fetcher.StartFetching(context.Background(), p, 10*time.Second, normalisedNewsfeed, wg)
 	}
-
-	// Close the channel when all workers (fetchers) are done.
-	go func() {
-		wg.Wait()
-		close(normalisedNewsfeed)
-	}()
-
-	// This loop will stay active as long as fetchers are sending data.
-	// It will only exit once the channel is closed by the goroutine above.
-	for article := range normalisedNewsfeed {
-		fmt.Println("Received:", article.Title)
-	}
-
-	// 3. Only after the loop finishes is the program truly done.
-	fmt.Println("All articles processed. Exiting.")
 }

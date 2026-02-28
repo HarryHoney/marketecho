@@ -12,6 +12,7 @@ import (
 type NewsDataIO struct {
 	APIKey string
 	URL    string
+	QUERY  string
 }
 
 // Internal struct to match the JSON you provided
@@ -26,7 +27,7 @@ type newsDataResponse struct {
 }
 
 func (n *NewsDataIO) FetchLatest(ctx context.Context) ([]*model.Article, error) {
-	resp, err := http.Get(fmt.Sprintf("%s?apikey=%s", n.URL, n.APIKey))
+	resp, err := http.Get(fmt.Sprintf("%s?apikey=%s&%s", n.URL, n.APIKey, n.QUERY))
 	if err != nil {
 		return nil, err
 	}

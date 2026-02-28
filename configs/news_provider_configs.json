@@ -1,0 +1,22 @@
+{
+    "newsdata_io" : [
+        {
+            "api_key_reference": "newsdata_api_key",
+            "endpoint": "https://newsdata.io/api/1/latest",
+            "query_params": {
+                "country": "us,gb,in",
+                "language": "en",
+                "category": "breaking,business,politics,technology,science"
+            }
+        },
+        {
+            "api_key_reference": "newsdata_api_key",
+            "endpoint": "https://newsdata.io/api/1/latest",
+            "query_params": {
+                "country": "in",
+                "language": "en",
+                "category": "breaking,business,politics,technology,science"
+            }
+        }
+    ]
+}

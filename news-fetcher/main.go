@@ -2,48 +2,56 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"news-fetcher/internal/fetcher"
 	"news-fetcher/internal/provider"
-	"os"
+	"sync"
 	"time"
+
+	dao "dao/golang"
+	"news-fetcher/internal/model"
 )
 
 func main() {
-	apiKey, err := loadAPIKey()
+	configs, err := dao.LoadNewsProviderConfigs()
 	if err != nil {
 		panic(err)
 	}
-	// Initialize Provider (Easy to swap in future)
-	p := &provider.NewsDataIO{
-		APIKey: apiKey.(string),
-		URL:    "https://newsdata.io/api/1/latest",
+
+	normalisedNewsfeed := make(chan *model.Article) // channel for normalised articles
+
+	var wg sync.WaitGroup
+	// Handle news from NewsDataIO
+	for _, config := range configs.GetNewsdataIOConfigs() {
+		fmt.Printf("Processing config: %+v\n", config)
+		// Here you would initialize your provider and start fetching
+		apiKey, err := dao.GetAPIKey(config.APIKeyReference)
+		if err != nil {
+			fmt.Printf("Failed to get API key: %v\n", err)
+			continue
+		}
+		p := &provider.NewsDataIO{
+			APIKey: apiKey.(string), // Type assertion to string
+			URL:    config.Endpoint,
+			QUERY:  fmt.Sprintf("country=%s&language=%s&category=%s", config.QueryParams.Country, config.QueryParams.Language, config.QueryParams.Category),
+		}
+		wg.Add(1)
+		// Start fetcher in a goroutine with a 10-second rate limit
+		go fetcher.StartFetching(context.Background(), p, 10*time.Second, normalisedNewsfeed, &wg)
 	}
 
-	// Start fetcher in a goroutine with a 10-second rate limit
-	fetcher.StartFetching(context.Background(), p, 10*time.Second)
-}
+	// Close the channel when all workers (fetchers) are done.
+	go func() {
+		wg.Wait()
+		close(normalisedNewsfeed)
+	}()
 
-func loadAPIKey() (any, any) {
-	// 1. Open the file
-	file, err := os.Open("../creds/api_keys.json")
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-
-	// 2. Decode into a map
-	var data map[string]any
-	if err := json.NewDecoder(file).Decode(&data); err != nil {
-		panic(err)
+	// This loop will stay active as long as fetchers are sending data.
+	// It will only exit once the channel is closed by the goroutine above.
+	for article := range normalisedNewsfeed {
+		fmt.Println("Received:", article.Title)
 	}
 
-	// 3. Extract your specific attribute (e.g., "target_id")
-	// We use "type assertion" to ensure it's the type we expect
-	if val, ok := data["newsdata_api_key"]; ok {
-		return val, nil
-	} else {
-		return nil, fmt.Errorf("key not found")
-	}
+	// 3. Only after the loop finishes is the program truly done.
+	fmt.Println("All articles processed. Exiting.")
 }

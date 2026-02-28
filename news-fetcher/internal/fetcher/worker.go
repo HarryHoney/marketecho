@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"news-fetcher/internal/model"
 	"news-fetcher/internal/provider"
+	"sync"
 	"time"
 )
 
-func StartFetching(ctx context.Context, p provider.NewsProvider, interval time.Duration) {
+func StartFetching(ctx context.Context, p provider.NewsProvider, interval time.Duration, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {
+	defer wg.Done()
 	articles, err := p.FetchLatest(ctx)
 	if err != nil {
 		log.Printf("Error or Rate Limit: %v", err)
@@ -16,6 +19,11 @@ func StartFetching(ctx context.Context, p provider.NewsProvider, interval time.D
 
 	fmt.Printf("Fetched %d normalized articles\n", len(articles))
 	for _, a := range articles {
-		log.Printf("Processed: %s", a.Title)
+		select {
+		case normalisedNewsfeed <- a:
+		case <-ctx.Done():
+			log.Printf("Context cancelled: %v", ctx.Err())
+			return
+		}
 	}
 }

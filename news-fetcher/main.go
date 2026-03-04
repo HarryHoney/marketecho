@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"news-fetcher/internal/fetcher"
 	"news-fetcher/internal/provider"
 	"sync"
@@ -10,6 +12,8 @@ import (
 
 	dao "dao/golang"
 	"news-fetcher/internal/model"
+
+	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 func main() {
@@ -17,6 +21,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Initialize RabbitMQ connection, channel, and queue
+	conn, ch, q := queueInit()
+	defer conn.Close()
+	defer ch.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
 	normalisedNewsfeed := make(chan *model.Article) // channel for normalised articles
 
@@ -37,11 +49,62 @@ func main() {
 	// In golang, ranging over a channel will block until the channel is closed, so this ensures we process all articles before exiting.
 	for article := range normalisedNewsfeed {
 		fmt.Println("Received:", article.Title)
-		// TODO: Here you would typically send the article to your pubsub system.
+
+		// Publish article to queue
+		articleJSON, err := json.Marshal(article)
+		if err != nil {
+			log.Printf("Failed to marshal article: %v", err)
+			continue
+		}
+
+		err = ch.PublishWithContext(ctx,
+			"",     // exchange (default)
+			q.Name, // routing key (queue name)
+			false,  // mandatory
+			false,  // immediate
+			amqp.Publishing{
+				ContentType: "application/json",
+				Body:        articleJSON,
+			})
+		if err != nil {
+			log.Printf("Failed to publish article: %v", err)
+			continue
+		}
+		fmt.Printf("Published article: %s\n", article.Title)
 	}
 
 	// 3. Only after the loop finishes is the program truly done.
 	fmt.Println("All articles processed. Exiting.")
+}
+
+// queueInit initializes RabbitMQ connection, channel, and declares the articles queue
+func queueInit() (*amqp.Connection, *amqp.Channel, amqp.Queue) {
+	// 1. Connect to RabbitMQ
+	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	if err != nil {
+		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+	}
+
+	// 2. Create a channel
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Fatalf("Failed to open a channel: %v", err)
+	}
+
+	// 3. Declare the articles queue
+	q, err := ch.QueueDeclare(
+		"articles_queue", // name - descriptive queue name
+		false,            // durable
+		false,            // delete when unused
+		false,            // exclusive
+		false,            // no-wait
+		nil,              // arguments
+	)
+	if err != nil {
+		log.Fatalf("Failed to declare articles queue: %v", err)
+	}
+
+	return conn, ch, q
 }
 
 func fetchFromNewsDataIO(configs *dao.NewsProviderConfigs, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {

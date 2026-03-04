@@ -7,6 +7,7 @@ import (
 	"log"
 	"news-fetcher/internal/fetcher"
 	"news-fetcher/internal/provider"
+	"os"
 	"sync"
 	"time"
 
@@ -79,8 +80,9 @@ func main() {
 
 // queueInit initializes RabbitMQ connection, channel, and declares the articles queue
 func queueInit() (*amqp.Connection, *amqp.Channel, amqp.Queue) {
+	connectionString, queueName := fetchRabbitMQConfig()
 	// 1. Connect to RabbitMQ
-	conn, err := amqp.Dial("amqp://guest:guest@localhost:5672/")
+	conn, err := amqp.Dial(connectionString)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
@@ -93,18 +95,35 @@ func queueInit() (*amqp.Connection, *amqp.Channel, amqp.Queue) {
 
 	// 3. Declare the articles queue
 	q, err := ch.QueueDeclare(
-		"articles_queue", // name - descriptive queue name
-		false,            // durable
-		false,            // delete when unused
-		false,            // exclusive
-		false,            // no-wait
-		nil,              // arguments
+		queueName, // name - descriptive queue name
+		false,     // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
 	)
 	if err != nil {
 		log.Fatalf("Failed to declare articles queue: %v", err)
 	}
 
 	return conn, ch, q
+}
+
+func fetchRabbitMQConfig() (string, string) {
+	// 1. Open the file
+	file, err := os.Open("../configs/rabbit_mq.json")
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	// 2. Decode into a map
+	var data map[string]string
+	if err := json.NewDecoder(file).Decode(&data); err != nil {
+		panic(err)
+	}
+
+	return data["connection_string"], data["queue_name"]
 }
 
 func fetchFromNewsDataIO(configs *dao.NewsProviderConfigs, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {

@@ -1,0 +1,4 @@
+{
+    "connection_string": "amqp://guest:guest@localhost:5672/",
+    "queue_name": "news_articles_queue"
+}

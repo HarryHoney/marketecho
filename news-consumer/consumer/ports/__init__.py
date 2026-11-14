@@ -1,0 +1,1 @@
+"""Hexagonal Ports (Protocol interfaces)."""

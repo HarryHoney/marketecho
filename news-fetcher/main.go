@@ -5,144 +5,198 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"news-fetcher/internal/dedup"
 	"news-fetcher/internal/fetcher"
+	"news-fetcher/internal/model"
 	"news-fetcher/internal/provider"
+	"news-fetcher/internal/publisher"
 	"os"
+	"os/signal"
+	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	dao "dao/golang"
-	"news-fetcher/internal/model"
 
-	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/joho/godotenv"
 )
 
 func main() {
+	// Load environment variables
+	if err := godotenv.Load("../.env"); err != nil {
+		log.Println("No .env file found or error reading it. Relying on system environment variables.")
+	}
+
 	configs, err := dao.LoadNewsProviderConfigs()
 	if err != nil {
 		panic(err)
 	}
 
-	// Initialize RabbitMQ connection, channel, and queue
-	conn, ch, q := queueInit()
-	defer conn.Close()
-	defer ch.Close()
+	// Initialize durable RabbitMQ publisher (with Dead-Letter Exchange & DLQ)
+	rmqCfg := fetchRabbitMQConfig()
+	pub, err := publisher.NewRabbitMQPublisher(rmqCfg)
+	if err != nil {
+		log.Fatalf("Failed to initialize RabbitMQ publisher: %v", err)
+	}
+	defer pub.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	// Initialize L1 Hybrid Deduplicator (SHA-256 + 64-bit SimHash with 24h TTL)
+	deduplicator := initDeduplicator()
+
+	// Graceful OS signal shutdown context for continuous streaming workers
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	normalisedNewsfeed := make(chan *model.Article) // channel for normalised articles
 
 	var wg sync.WaitGroup
-	// Handle news from NewsDataIO
-	fetchFromNewsDataIO(configs, normalisedNewsfeed, &wg)
+	// 1. Start zero-cost RSS feed providers
+	fetchFromRSSFeeds(ctx, configs, normalisedNewsfeed, &wg)
+	// 2. Start NewsDataIO providers (if configured and API key is available)
+	fetchFromNewsDataIO(ctx, configs, normalisedNewsfeed, &wg)
 
-	// Close the channel when all workers (fetchers) are done.
+	// Close the channel when all workers (fetchers) have exited on ctx cancellation.
 	go func() {
 		wg.Wait()
-		// Close the channel to signal that no more articles will be sent. Receive is opened until all articles are processed.
 		close(normalisedNewsfeed)
 	}()
 
-	// This loop will stay active as long as fetchers are sending data.
-	// It will only exit once the channel is closed by the goroutine above.
-	// This range on news channel is making the main goroutine wait for all articles to be processed before exiting.
-	// In golang, ranging over a channel will block until the channel is closed, so this ensures we process all articles before exiting.
 	for article := range normalisedNewsfeed {
 		fmt.Println("Received:", article.Title)
 
-		// Publish article to queue
-		articleJSON, err := json.Marshal(article)
-		if err != nil {
-			log.Printf("Failed to marshal article: %v", err)
+		// L1 Deduplication check (Exact SHA-256 + 64-bit SimHash near-duplicate)
+		dedupCtx, dedupCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		isDup, reason, dedupErr := deduplicator.IsArticleDuplicate(dedupCtx, article)
+		dedupCancel()
+		if dedupErr != nil {
+			log.Printf("Warning: L1 deduplication check failed (proceeding to publish): %v", dedupErr)
+		} else if isDup {
+			fmt.Printf("Skipping duplicate article [L1 %s hit]: %s\n", reason, article.Title)
 			continue
 		}
 
-		err = ch.PublishWithContext(ctx,
-			"",     // exchange (default)
-			q.Name, // routing key (queue name)
-			false,  // mandatory
-			false,  // immediate
-			amqp.Publishing{
-				ContentType: "application/json",
-				Body:        articleJSON,
-			})
+		pubCtx, pubCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := pub.Publish(pubCtx, article)
+		pubCancel()
 		if err != nil {
 			log.Printf("Failed to publish article: %v", err)
 			continue
 		}
-		fmt.Printf("Published article: %s\n", article.Title)
+		fmt.Printf("Published article: %s (trace_id=%s)\n", article.Title, article.TraceId)
 	}
 
-	// 3. Only after the loop finishes is the program truly done.
-	fmt.Println("All articles processed. Exiting.")
+	fmt.Println("All articles processed. Exiting gracefully.")
 }
 
-// queueInit initializes RabbitMQ connection, channel, and declares the articles queue
-func queueInit() (*amqp.Connection, *amqp.Channel, amqp.Queue) {
-	connectionString, queueName := fetchRabbitMQConfig()
-	// 1. Connect to RabbitMQ
-	conn, err := amqp.Dial(connectionString)
-	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+func initDeduplicator() dedup.Deduplicator {
+	ttlSeconds := 86400 // Default 24 hours
+	if rawTTL := os.Getenv("L1_DEDUP_TTL_SECONDS"); rawTTL != "" {
+		if parsed, err := strconv.Atoi(rawTTL); err == nil && parsed > 0 {
+			ttlSeconds = parsed
+		}
+	}
+	ttl := time.Duration(ttlSeconds) * time.Second
+
+	redisHost := os.Getenv("REDIS_HOST")
+	redisPort := os.Getenv("REDIS_PORT")
+	redisDedup := dedup.NewRedisDeduplicator(redisHost, redisPort, ttl)
+
+	pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := redisDedup.Ping(pingCtx); err != nil {
+		log.Printf("Redis unavailable (%v); falling back to InMemoryDeduplicator (TTL=%s)", err, ttl)
+		return dedup.NewInMemoryDeduplicator(ttl)
 	}
 
-	// 2. Create a channel
-	ch, err := conn.Channel()
-	if err != nil {
-		log.Fatalf("Failed to open a channel: %v", err)
-	}
-
-	// 3. Declare the articles queue
-	q, err := ch.QueueDeclare(
-		queueName, // name - descriptive queue name
-		false,     // durable
-		false,     // delete when unused
-		false,     // exclusive
-		false,     // no-wait
-		nil,       // arguments
-	)
-	if err != nil {
-		log.Fatalf("Failed to declare articles queue: %v", err)
-	}
-
-	return conn, ch, q
+	log.Printf("Connected to Redis L1 Deduplicator (SHA-256 + SimHash, TTL=%s)", ttl)
+	return redisDedup
 }
 
-func fetchRabbitMQConfig() (string, string) {
-	// 1. Open the file
-	file, err := os.Open("../configs/rabbit_mq.json")
+func fetchRabbitMQConfig() publisher.RabbitMQConfig {
+	configDir := os.Getenv("CONFIG_DIR")
+	if configDir == "" {
+		configDir = "../configs"
+	}
+	filePath := fmt.Sprintf("%s/rabbit_mq.json", configDir)
+
+	file, err := os.Open(filePath)
 	if err != nil {
 		panic(err)
 	}
 	defer file.Close()
 
-	// 2. Decode into a map
 	var data map[string]string
 	if err := json.NewDecoder(file).Decode(&data); err != nil {
 		panic(err)
 	}
 
-	return data["connection_string"], data["queue_name"]
+	rmqUser := os.Getenv("RABBITMQ_USER")
+	if rmqUser == "" {
+		rmqUser = "guest"
+	}
+	rmqPass := os.Getenv("RABBITMQ_PASSWORD")
+	if rmqPass == "" {
+		rmqPass = "guest"
+	}
+	rmqHost := os.Getenv("RABBITMQ_HOST")
+	if rmqHost == "" {
+		rmqHost = "localhost"
+	}
+	rmqPort := os.Getenv("RABBITMQ_PORT")
+	if rmqPort == "" {
+		rmqPort = "5672"
+	}
+
+	connectionString := fmt.Sprintf("amqp://%s:%s@%s:%s/", rmqUser, rmqPass, rmqHost, rmqPort)
+
+	queueName := data["queue_name"]
+	if queueName == "" {
+		queueName = "news_articles_queue"
+	}
+	dlxName := data["dlx_name"]
+	if dlxName == "" {
+		dlxName = publisher.DefaultDLXName
+	}
+	dlqName := data["dlq_name"]
+	if dlqName == "" {
+		dlqName = publisher.DefaultDLQName
+	}
+
+	return publisher.RabbitMQConfig{
+		ConnectionURL: connectionString,
+		QueueName:     queueName,
+		DLXName:       dlxName,
+		DLQName:       dlqName,
+	}
 }
 
-func fetchFromNewsDataIO(configs *dao.NewsProviderConfigs, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {
-	// Handle news from NewsDataIO
+func fetchFromRSSFeeds(ctx context.Context, configs *dao.NewsProviderConfigs, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {
+	for _, feed := range configs.GetRSSFeedConfigs() {
+		fmt.Printf("Starting RSS provider: %s (%s)\n", feed.Name, feed.URL)
+		p := &provider.RSSProvider{
+			FeedName: feed.Name,
+			FeedURL:  feed.URL,
+		}
+		wg.Add(1)
+		go fetcher.StartFetching(ctx, p, 30*time.Second, normalisedNewsfeed, wg)
+	}
+}
+
+func fetchFromNewsDataIO(ctx context.Context, configs *dao.NewsProviderConfigs, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {
 	for _, config := range configs.GetNewsdataIOConfigs() {
 		fmt.Printf("Processing config: %+v\n", config)
-		// Here you would initialize your provider and start fetching
 		apiKey, err := dao.GetAPIKey(config.APIKeyReference)
 		if err != nil {
-			fmt.Printf("Failed to get API key: %v\n", err)
+			fmt.Printf("Skipping NewsDataIO provider (missing API key): %v\n", err)
 			continue
 		}
 		p := &provider.NewsDataIO{
-			APIKey: apiKey.(string), // Type assertion to string
+			APIKey: apiKey,
 			URL:    config.Endpoint,
 			QUERY:  fmt.Sprintf("country=%s&language=%s&category=%s", config.QueryParams.Country, config.QueryParams.Language, config.QueryParams.Category),
 		}
 		wg.Add(1)
-		// Start fetcher in a goroutine with a 10-second rate limit
-		go fetcher.StartFetching(context.Background(), p, 10*time.Second, normalisedNewsfeed, wg)
+		go fetcher.StartFetching(ctx, p, 10*time.Second, normalisedNewsfeed, wg)
 	}
 }

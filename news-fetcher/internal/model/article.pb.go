@@ -21,15 +21,67 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type SentimentLabel int32
+
+const (
+	SentimentLabel_NEUTRAL SentimentLabel = 0
+	SentimentLabel_BULLISH SentimentLabel = 1
+	SentimentLabel_BEARISH SentimentLabel = 2
+)
+
+// Enum value maps for SentimentLabel.
+var (
+	SentimentLabel_name = map[int32]string{
+		0: "NEUTRAL",
+		1: "BULLISH",
+		2: "BEARISH",
+	}
+	SentimentLabel_value = map[string]int32{
+		"NEUTRAL": 0,
+		"BULLISH": 1,
+		"BEARISH": 2,
+	}
+)
+
+func (x SentimentLabel) Enum() *SentimentLabel {
+	p := new(SentimentLabel)
+	*p = x
+	return p
+}
+
+func (x SentimentLabel) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (SentimentLabel) Descriptor() protoreflect.EnumDescriptor {
+	return file_article_proto_enumTypes[0].Descriptor()
+}
+
+func (SentimentLabel) Type() protoreflect.EnumType {
+	return &file_article_proto_enumTypes[0]
+}
+
+func (x SentimentLabel) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use SentimentLabel.Descriptor instead.
+func (SentimentLabel) EnumDescriptor() ([]byte, []int) {
+	return file_article_proto_rawDescGZIP(), []int{0}
+}
+
 type Article struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
-	Description   string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
-	Content       string                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
-	Source        string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Id              string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Title           string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Description     string                 `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
+	Content         string                 `protobuf:"bytes,4,opt,name=content,proto3" json:"content,omitempty"`
+	Source          string                 `protobuf:"bytes,5,opt,name=source,proto3" json:"source,omitempty"`
+	Url             string                 `protobuf:"bytes,6,opt,name=url,proto3" json:"url,omitempty"`
+	PublishedAtUnix int64                  `protobuf:"varint,7,opt,name=published_at_unix,json=publishedAtUnix,proto3" json:"published_at_unix,omitempty"`
+	TraceId         string                 `protobuf:"bytes,8,opt,name=trace_id,json=traceId,proto3" json:"trace_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *Article) Reset() {
@@ -97,6 +149,27 @@ func (x *Article) GetSource() string {
 	return ""
 }
 
+func (x *Article) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *Article) GetPublishedAtUnix() int64 {
+	if x != nil {
+		return x.PublishedAtUnix
+	}
+	return 0
+}
+
+func (x *Article) GetTraceId() string {
+	if x != nil {
+		return x.TraceId
+	}
+	return ""
+}
+
 type ArticleList struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Articles      []*Article             `protobuf:"bytes,1,rep,name=articles,proto3" json:"articles,omitempty"`
@@ -141,19 +214,138 @@ func (x *ArticleList) GetArticles() []*Article {
 	return nil
 }
 
+type MarketSignal struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ArticleId        string                 `protobuf:"bytes,1,opt,name=article_id,json=articleId,proto3" json:"article_id,omitempty"`
+	Tickers          []string               `protobuf:"bytes,2,rep,name=tickers,proto3" json:"tickers,omitempty"`
+	Sentiment        SentimentLabel         `protobuf:"varint,3,opt,name=sentiment,proto3,enum=article.SentimentLabel" json:"sentiment,omitempty"`
+	SentimentScore   float32                `protobuf:"fixed32,4,opt,name=sentiment_score,json=sentimentScore,proto3" json:"sentiment_score,omitempty"` // -1.0 to 1.0
+	Confidence       float32                `protobuf:"fixed32,5,opt,name=confidence,proto3" json:"confidence,omitempty"`                               // 0.0 to 1.0
+	Reasoning        string                 `protobuf:"bytes,6,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
+	SemanticCacheHit bool                   `protobuf:"varint,7,opt,name=semantic_cache_hit,json=semanticCacheHit,proto3" json:"semantic_cache_hit,omitempty"`
+	ProcessedAtUnix  int64                  `protobuf:"varint,8,opt,name=processed_at_unix,json=processedAtUnix,proto3" json:"processed_at_unix,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *MarketSignal) Reset() {
+	*x = MarketSignal{}
+	mi := &file_article_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MarketSignal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MarketSignal) ProtoMessage() {}
+
+func (x *MarketSignal) ProtoReflect() protoreflect.Message {
+	mi := &file_article_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MarketSignal.ProtoReflect.Descriptor instead.
+func (*MarketSignal) Descriptor() ([]byte, []int) {
+	return file_article_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *MarketSignal) GetArticleId() string {
+	if x != nil {
+		return x.ArticleId
+	}
+	return ""
+}
+
+func (x *MarketSignal) GetTickers() []string {
+	if x != nil {
+		return x.Tickers
+	}
+	return nil
+}
+
+func (x *MarketSignal) GetSentiment() SentimentLabel {
+	if x != nil {
+		return x.Sentiment
+	}
+	return SentimentLabel_NEUTRAL
+}
+
+func (x *MarketSignal) GetSentimentScore() float32 {
+	if x != nil {
+		return x.SentimentScore
+	}
+	return 0
+}
+
+func (x *MarketSignal) GetConfidence() float32 {
+	if x != nil {
+		return x.Confidence
+	}
+	return 0
+}
+
+func (x *MarketSignal) GetReasoning() string {
+	if x != nil {
+		return x.Reasoning
+	}
+	return ""
+}
+
+func (x *MarketSignal) GetSemanticCacheHit() bool {
+	if x != nil {
+		return x.SemanticCacheHit
+	}
+	return false
+}
+
+func (x *MarketSignal) GetProcessedAtUnix() int64 {
+	if x != nil {
+		return x.ProcessedAtUnix
+	}
+	return 0
+}
+
 var File_article_proto protoreflect.FileDescriptor
 
 const file_article_proto_rawDesc = "" +
 	"\n" +
-	"\rarticle.proto\x12\aarticle\"\x83\x01\n" +
+	"\rarticle.proto\x12\aarticle\"\xdc\x01\n" +
 	"\aArticle\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05title\x18\x02 \x01(\tR\x05title\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12\x18\n" +
 	"\acontent\x18\x04 \x01(\tR\acontent\x12\x16\n" +
-	"\x06source\x18\x05 \x01(\tR\x06source\";\n" +
+	"\x06source\x18\x05 \x01(\tR\x06source\x12\x10\n" +
+	"\x03url\x18\x06 \x01(\tR\x03url\x12*\n" +
+	"\x11published_at_unix\x18\a \x01(\x03R\x0fpublishedAtUnix\x12\x19\n" +
+	"\btrace_id\x18\b \x01(\tR\atraceId\";\n" +
 	"\vArticleList\x12,\n" +
-	"\barticles\x18\x01 \x03(\v2\x10.article.ArticleR\barticlesB\x1fZ\x1d./news-fetcher/internal/modelb\x06proto3"
+	"\barticles\x18\x01 \x03(\v2\x10.article.ArticleR\barticles\"\xbf\x02\n" +
+	"\fMarketSignal\x12\x1d\n" +
+	"\n" +
+	"article_id\x18\x01 \x01(\tR\tarticleId\x12\x18\n" +
+	"\atickers\x18\x02 \x03(\tR\atickers\x125\n" +
+	"\tsentiment\x18\x03 \x01(\x0e2\x17.article.SentimentLabelR\tsentiment\x12'\n" +
+	"\x0fsentiment_score\x18\x04 \x01(\x02R\x0esentimentScore\x12\x1e\n" +
+	"\n" +
+	"confidence\x18\x05 \x01(\x02R\n" +
+	"confidence\x12\x1c\n" +
+	"\treasoning\x18\x06 \x01(\tR\treasoning\x12,\n" +
+	"\x12semantic_cache_hit\x18\a \x01(\bR\x10semanticCacheHit\x12*\n" +
+	"\x11processed_at_unix\x18\b \x01(\x03R\x0fprocessedAtUnix*7\n" +
+	"\x0eSentimentLabel\x12\v\n" +
+	"\aNEUTRAL\x10\x00\x12\v\n" +
+	"\aBULLISH\x10\x01\x12\v\n" +
+	"\aBEARISH\x10\x02B\x1fZ\x1d./news-fetcher/internal/modelb\x06proto3"
 
 var (
 	file_article_proto_rawDescOnce sync.Once
@@ -167,18 +359,22 @@ func file_article_proto_rawDescGZIP() []byte {
 	return file_article_proto_rawDescData
 }
 
-var file_article_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_article_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_article_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_article_proto_goTypes = []any{
-	(*Article)(nil),     // 0: article.Article
-	(*ArticleList)(nil), // 1: article.ArticleList
+	(SentimentLabel)(0),  // 0: article.SentimentLabel
+	(*Article)(nil),      // 1: article.Article
+	(*ArticleList)(nil),  // 2: article.ArticleList
+	(*MarketSignal)(nil), // 3: article.MarketSignal
 }
 var file_article_proto_depIdxs = []int32{
-	0, // 0: article.ArticleList.articles:type_name -> article.Article
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	1, // 0: article.ArticleList.articles:type_name -> article.Article
+	0, // 1: article.MarketSignal.sentiment:type_name -> article.SentimentLabel
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_article_proto_init() }
@@ -191,13 +387,14 @@ func file_article_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_article_proto_rawDesc), len(file_article_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   2,
+			NumEnums:      1,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_article_proto_goTypes,
 		DependencyIndexes: file_article_proto_depIdxs,
+		EnumInfos:         file_article_proto_enumTypes,
 		MessageInfos:      file_article_proto_msgTypes,
 	}.Build()
 	File_article_proto = out.File

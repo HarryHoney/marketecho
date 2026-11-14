@@ -6,5 +6,6 @@ import (
 )
 
 type NewsProvider interface {
+	Name() string
 	FetchLatest(ctx context.Context) ([]*model.Article, error)
 }

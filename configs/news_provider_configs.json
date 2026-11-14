@@ -1,19 +1,20 @@
 {
-    "newsdata_io" : [
+    "rss_feeds": [
+        {
+            "name": "Yahoo Finance",
+            "url": "https://finance.yahoo.com/news/rssindex"
+        },
+        {
+            "name": "CNBC Top News",
+            "url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114"
+        }
+    ],
+    "newsdata_io": [
         {
             "api_key_reference": "newsdata_api_key",
             "endpoint": "https://newsdata.io/api/1/latest",
             "query_params": {
                 "country": "us,gb,in",
-                "language": "en",
-                "category": "breaking,business,politics,technology,science"
-            }
-        },
-        {
-            "api_key_reference": "newsdata_api_key",
-            "endpoint": "https://newsdata.io/api/1/latest",
-            "query_params": {
-                "country": "in",
                 "language": "en",
                 "category": "breaking,business,politics,technology,science"
             }

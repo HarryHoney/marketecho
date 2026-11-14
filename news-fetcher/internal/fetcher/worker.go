@@ -12,18 +12,42 @@ import (
 
 func StartFetching(ctx context.Context, p provider.NewsProvider, interval time.Duration, normalisedNewsfeed chan<- *model.Article, wg *sync.WaitGroup) {
 	defer wg.Done()
-	articles, err := p.FetchLatest(ctx)
-	if err != nil {
-		log.Printf("Error or Rate Limit: %v", err)
+
+	if interval <= 0 {
+		interval = 10 * time.Second
 	}
 
-	fmt.Printf("Fetched %d normalized articles\n", len(articles))
-	for _, a := range articles {
-		select {
-		case normalisedNewsfeed <- a:
-		case <-ctx.Done():
-			log.Printf("Context cancelled: %v", ctx.Err())
+	fetchOnce := func() {
+		articles, err := p.FetchLatest(ctx)
+		if err != nil {
+			log.Printf("[%s] Error or Rate Limit: %v", p.Name(), err)
 			return
+		}
+
+		fmt.Printf("[%s] Fetched %d normalized articles\n", p.Name(), len(articles))
+		for _, a := range articles {
+			select {
+			case normalisedNewsfeed <- a:
+			case <-ctx.Done():
+				log.Printf("[%s] Context cancelled while sending article: %v", p.Name(), ctx.Err())
+				return
+			}
+		}
+	}
+
+	// Perform initial fetch immediately on startup
+	fetchOnce()
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("[%s] Stopping worker: %v", p.Name(), ctx.Err())
+			return
+		case <-ticker.C:
+			fetchOnce()
 		}
 	}
 }

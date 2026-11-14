@@ -7,15 +7,17 @@ import (
 	"net/http"
 	"news-fetcher/internal/model"
 	"strings"
+	"time"
 )
 
 type NewsDataIO struct {
 	APIKey string
 	URL    string
 	QUERY  string
+	Client *http.Client
 }
 
-// Internal struct to match the JSON you provided
+// Internal struct to match the JSON from NewsData.io
 type newsDataResponse struct {
 	Results []struct {
 		ArticleID   string   `json:"article_id"`
@@ -23,18 +25,39 @@ type newsDataResponse struct {
 		Description string   `json:"description"`
 		Content     string   `json:"content"`
 		Creator     []string `json:"creator"`
+		Link        string   `json:"link"`
+		PubDate     string   `json:"pubDate"`
 	} `json:"results"`
 }
 
+func (n *NewsDataIO) Name() string {
+	return "NewsDataIO"
+}
+
+func (n *NewsDataIO) httpClient() *http.Client {
+	if n.Client != nil {
+		return n.Client
+	}
+	return &http.Client{Timeout: 10 * time.Second}
+}
+
 func (n *NewsDataIO) FetchLatest(ctx context.Context) ([]*model.Article, error) {
-	resp, err := http.Get(fmt.Sprintf("%s?apikey=%s&%s", n.URL, n.APIKey, n.QUERY))
+	reqURL := fmt.Sprintf("%s?apikey=%s&%s", n.URL, n.APIKey, n.QUERY)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := n.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("network error while contacting API: %w", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 {
-		return nil, fmt.Errorf("rate limited")
+	if resp.StatusCode == http.StatusTooManyRequests { // 429
+		return nil, fmt.Errorf("rate limited by NewsData API")
+	} else if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("newsData API is down or returned an error (HTTP %d)", resp.StatusCode)
 	}
 
 	var data newsDataResponse
@@ -44,12 +67,27 @@ func (n *NewsDataIO) FetchLatest(ctx context.Context) ([]*model.Article, error) 
 
 	var normalized []*model.Article
 	for _, res := range data.Results {
+		// Data Validation: Skip articles missing critical information
+		if strings.TrimSpace(res.Title) == "" || strings.TrimSpace(res.Content) == "" {
+			fmt.Printf("Warning: Skipping article %s due to missing title or content\n", res.ArticleID)
+			continue
+		}
+
+		source := strings.Join(res.Creator, ", ")
+		if source == "" {
+			source = n.Name()
+		}
+
+		publishedUnix := parsePubDate(res.PubDate)
+
 		normalized = append(normalized, &model.Article{
-			Id:          res.ArticleID,
-			Title:       res.Title,
-			Description: res.Description,
-			Content:     res.Content,
-			Source:      strings.Join(res.Creator, ", "), // Handle array to string
+			Id:              res.ArticleID,
+			Title:           res.Title,
+			Description:     res.Description,
+			Content:         res.Content,
+			Source:          source,
+			Url:             res.Link,
+			PublishedAtUnix: publishedUnix,
 		})
 	}
 	return normalized, nil

@@ -1,1 +1,33 @@
-creds
+# Credentials & Environment
+creds/
+.env
+
+# Compiled Go binaries & test artifacts
+news-fetcher/main
+news-fetcher/news-fetcher
+news-fetcher/fetcher_test
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# Test & mock artifacts
+tests/mock_configs/
+data/
+news-consumer/data/
+*.db
+*.jsonl
+
+# OS metadata
+.DS_Store

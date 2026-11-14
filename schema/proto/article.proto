@@ -9,8 +9,28 @@ message Article {
   string description = 3;
   string content = 4;
   string source = 5;
+  string url = 6;
+  int64 published_at_unix = 7;
+  string trace_id = 8;
 }
 
 message ArticleList {
   repeated Article articles = 1;
+}
+
+enum SentimentLabel {
+  NEUTRAL = 0;
+  BULLISH = 1;
+  BEARISH = 2;
+}
+
+message MarketSignal {
+  string article_id = 1;
+  repeated string tickers = 2;
+  SentimentLabel sentiment = 3;
+  float sentiment_score = 4; // -1.0 to 1.0
+  float confidence = 5;      // 0.0 to 1.0
+  string reasoning = 6;
+  bool semantic_cache_hit = 7;
+  int64 processed_at_unix = 8;
 }

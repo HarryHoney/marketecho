@@ -8,6 +8,12 @@ What it takes to run this project so far.
 Dependencies for go:
 1. go get google.golang.org/protobuf
 2. go get github.com/rabbitmq/amqp091-go
+3. go get github.com/joho/godotenv
+
+## Configuration (Environment Variables)
+Before running the project, you must set up your environment variables. 
+1. Copy the example file: `cp .env.example .env`
+2. Open `.env` and fill in your real `NEWSDATA_API_KEY` and `GEMINI_API_KEY`.
 
 ------------------------------------------------------------------------
 To Run the docker image for RabbitMQ. Just run the following command:

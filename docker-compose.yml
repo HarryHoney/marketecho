@@ -1,0 +1,70 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: marketecho-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis/redis-stack-server:latest
+    container_name: marketecho-redis
+    ports:
+      - "6379:6379"
+    environment:
+      - REDIS_ARGS=--maxmemory 256mb --maxmemory-policy volatile-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  news-fetcher:
+    build:
+      context: .
+      dockerfile: news-fetcher/Dockerfile
+    container_name: marketecho-fetcher
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - NEWSDATA_API_KEY=${NEWSDATA_API_KEY:-}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - L1_DEDUP_TTL_SECONDS=${L1_DEDUP_TTL_SECONDS:-86400}
+    restart: unless-stopped
+
+  news-consumer:
+    build:
+      context: .
+      dockerfile: news-consumer/Dockerfile
+    container_name: marketecho-consumer
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-guest}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - L2_CACHE_TTL_SECONDS=${L2_CACHE_TTL_SECONDS:-43200}
+    restart: unless-stopped

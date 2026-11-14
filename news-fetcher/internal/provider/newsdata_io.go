@@ -67,9 +67,22 @@ func (n *NewsDataIO) FetchLatest(ctx context.Context) ([]*model.Article, error) 
 
 	var normalized []*model.Article
 	for _, res := range data.Results {
+		title := strings.TrimSpace(res.Title)
+		desc := strings.TrimSpace(res.Description)
+		content := strings.TrimSpace(res.Content)
+
+		// On NewsData.io free plans, 'content' is often empty or "ONLY AVAILABLE IN PAID PLANS".
+		// Fall back cleanly to description or title so valid news is never dropped.
+		if content == "" || strings.EqualFold(content, "ONLY AVAILABLE IN PAID PLANS") {
+			content = desc
+		}
+		if content == "" {
+			content = title
+		}
+
 		// Data Validation: Skip articles missing critical information
-		if strings.TrimSpace(res.Title) == "" || strings.TrimSpace(res.Content) == "" {
-			fmt.Printf("Warning: Skipping article %s due to missing title or content\n", res.ArticleID)
+		if title == "" {
+			fmt.Printf("Warning: Skipping article %s due to missing title\n", res.ArticleID)
 			continue
 		}
 
@@ -82,9 +95,9 @@ func (n *NewsDataIO) FetchLatest(ctx context.Context) ([]*model.Article, error) 
 
 		normalized = append(normalized, &model.Article{
 			Id:              res.ArticleID,
-			Title:           res.Title,
-			Description:     res.Description,
-			Content:         res.Content,
+			Title:           title,
+			Description:     desc,
+			Content:         content,
 			Source:          source,
 			Url:             res.Link,
 			PublishedAtUnix: publishedUnix,

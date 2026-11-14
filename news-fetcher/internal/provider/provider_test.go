@@ -107,9 +107,9 @@ func TestNewsDataIO_FetchLatest_AndTimeout(t *testing.T) {
 			},
 			{
 				"article_id": "nd-102",
-				"title": "Incomplete Article",
-				"description": "No content",
-				"content": "   "
+				"title": "   ",
+				"description": "Missing title should be skipped",
+				"content": "Some content"
 			}
 		]
 	}`

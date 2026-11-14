@@ -37,7 +37,11 @@ type NewsProviderConfigs struct {
 func LoadNewsProviderConfigs() (*NewsProviderConfigs, error) {
 	configDir := os.Getenv("CONFIG_DIR")
 	if configDir == "" {
-		configDir = "../configs"
+		if _, err := os.Stat("configs/news_provider_configs.json"); err == nil {
+			configDir = "configs"
+		} else {
+			configDir = "../configs"
+		}
 	}
 	filePath := fmt.Sprintf("%s/news_provider_configs.json", configDir)
 

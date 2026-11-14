@@ -23,10 +23,9 @@ import (
 )
 
 func main() {
-	// Load environment variables
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Println("No .env file found or error reading it. Relying on system environment variables.")
-	}
+	// Load environment variables (support running from repo root or news-fetcher/ directory)
+	_ = godotenv.Load(".env")
+	_ = godotenv.Load("../.env")
 
 	configs, err := dao.LoadNewsProviderConfigs()
 	if err != nil {
@@ -116,7 +115,11 @@ func initDeduplicator() dedup.Deduplicator {
 func fetchRabbitMQConfig() publisher.RabbitMQConfig {
 	configDir := os.Getenv("CONFIG_DIR")
 	if configDir == "" {
-		configDir = "../configs"
+		if _, err := os.Stat("configs/rabbit_mq.json"); err == nil {
+			configDir = "configs"
+		} else {
+			configDir = "../configs"
+		}
 	}
 	filePath := fmt.Sprintf("%s/rabbit_mq.json", configDir)
 

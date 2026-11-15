@@ -7,6 +7,7 @@ import (
 	"log"
 	"news-fetcher/internal/dedup"
 	"news-fetcher/internal/fetcher"
+	"news-fetcher/internal/metrics"
 	"news-fetcher/internal/model"
 	"news-fetcher/internal/provider"
 	"news-fetcher/internal/publisher"
@@ -31,6 +32,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Start Prometheus /metrics endpoint
+	metricsPort := os.Getenv("FETCHER_METRICS_PORT")
+	if metricsPort == "" {
+		metricsPort = "2112"
+	}
+	metrics.StartServer(":" + metricsPort)
 
 	// Initialize durable RabbitMQ publisher (with Dead-Letter Exchange & DLQ)
 	rmqCfg := fetchRabbitMQConfig()
@@ -71,6 +79,7 @@ func main() {
 		if dedupErr != nil {
 			log.Printf("Warning: L1 deduplication check failed (proceeding to publish): %v", dedupErr)
 		} else if isDup {
+			metrics.IncL1DedupHit(reason)
 			fmt.Printf("Skipping duplicate article [L1 %s hit]: %s\n", reason, article.Title)
 			continue
 		}
@@ -79,9 +88,11 @@ func main() {
 		err := pub.Publish(pubCtx, article)
 		pubCancel()
 		if err != nil {
+			metrics.IncPublishErrors()
 			log.Printf("Failed to publish article: %v", err)
 			continue
 		}
+		metrics.IncArticlesIngested()
 		fmt.Printf("Published article: %s (trace_id=%s)\n", article.Title, article.TraceId)
 	}
 

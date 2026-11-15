@@ -29,6 +29,9 @@ class JSONLSinkAdapter:
             article_id=article.id,
             semantic_cache_hit=semantic_cache_hit,
         )
+        company_name_str = signal.display_company_or_scope()
+        sector_str = ", ".join(pb_signal.sectors)
+        index_identifier_str = ", ".join(pb_signal.index_identifiers)
         record = {
             "article_id": pb_signal.article_id,
             "title": article.title,
@@ -36,7 +39,13 @@ class JSONLSinkAdapter:
             "url": article.url,
             "trace_id": article.trace_id,
             "published_at_unix": article.published_at_unix,
+            "company_name": company_name_str,
+            "companies": list(pb_signal.companies),
+            "sectors": list(pb_signal.sectors),
+            "sector": sector_str,
             "tickers": list(pb_signal.tickers),
+            "index_identifier": index_identifier_str,
+            "index_identifiers": list(pb_signal.index_identifiers),
             "sentiment": signal.sentiment.value,
             "sentiment_score": pb_signal.sentiment_score,
             "confidence": pb_signal.confidence,
@@ -71,16 +80,56 @@ class SQLiteSinkAdapter:
                     url TEXT,
                     trace_id TEXT,
                     published_at_unix INTEGER,
+                    company_name TEXT DEFAULT '',
+                    companies_json TEXT DEFAULT '[]',
+                    sector TEXT DEFAULT '',
+                    sectors_json TEXT DEFAULT '[]',
                     tickers_json TEXT NOT NULL,
+                    index_identifier TEXT DEFAULT '',
+                    index_identifiers_json TEXT DEFAULT '[]',
                     sentiment TEXT NOT NULL,
                     sentiment_score REAL NOT NULL,
                     confidence REAL NOT NULL,
                     reasoning TEXT,
                     semantic_cache_hit INTEGER NOT NULL,
-                    processed_at_unix INTEGER NOT NULL
+                    processed_at_unix INTEGER NOT NULL,
+                    evaluated_symbol TEXT DEFAULT '',
+                    price_open REAL DEFAULT 0.0,
+                    eod_close_price REAL DEFAULT 0.0,
+                    actual_change_pct REAL DEFAULT 0.0,
+                    actual_direction TEXT DEFAULT '',
+                    prediction_outcome TEXT DEFAULT '',
+                    performance_summary TEXT DEFAULT '',
+                    evaluated_at_unix INTEGER DEFAULT 0
                 )
                 """
             )
+            # Auto-migrate existing SQLite tables created in Phase 3/4 without dropping data
+            existing_cols = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(market_signals)").fetchall()
+            }
+            migrations = [
+                ("company_name", "TEXT DEFAULT ''"),
+                ("companies_json", "TEXT DEFAULT '[]'"),
+                ("sector", "TEXT DEFAULT ''"),
+                ("sectors_json", "TEXT DEFAULT '[]'"),
+                ("index_identifier", "TEXT DEFAULT ''"),
+                ("index_identifiers_json", "TEXT DEFAULT '[]'"),
+                ("evaluated_symbol", "TEXT DEFAULT ''"),
+                ("price_open", "REAL DEFAULT 0.0"),
+                ("eod_close_price", "REAL DEFAULT 0.0"),
+                ("actual_change_pct", "REAL DEFAULT 0.0"),
+                ("actual_direction", "TEXT DEFAULT ''"),
+                ("prediction_outcome", "TEXT DEFAULT ''"),
+                ("performance_summary", "TEXT DEFAULT ''"),
+                ("evaluated_at_unix", "INTEGER DEFAULT 0"),
+            ]
+            for col_name, col_def in migrations:
+                if col_name not in existing_cols:
+                    conn.execute(
+                        f"ALTER TABLE market_signals ADD COLUMN {col_name} {col_def}"
+                    )
             conn.commit()
 
     def save(
@@ -93,15 +142,21 @@ class SQLiteSinkAdapter:
             article_id=article.id,
             semantic_cache_hit=semantic_cache_hit,
         )
+        company_name_str = signal.display_company_or_scope()
+        sector_str = ", ".join(pb_signal.sectors)
+        index_identifier_str = ", ".join(pb_signal.index_identifiers)
+
         with self._lock:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute(
                     """
                     INSERT INTO market_signals (
                         article_id, title, source, url, trace_id, published_at_unix,
-                        tickers_json, sentiment, sentiment_score, confidence, reasoning,
+                        company_name, companies_json, sector, sectors_json, tickers_json,
+                        index_identifier, index_identifiers_json,
+                        sentiment, sentiment_score, confidence, reasoning,
                         semantic_cache_hit, processed_at_unix
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         pb_signal.article_id,
@@ -110,7 +165,13 @@ class SQLiteSinkAdapter:
                         article.url,
                         article.trace_id,
                         article.published_at_unix,
+                        company_name_str,
+                        json.dumps(list(pb_signal.companies)),
+                        sector_str,
+                        json.dumps(list(pb_signal.sectors)),
                         json.dumps(list(pb_signal.tickers)),
+                        index_identifier_str,
+                        json.dumps(list(pb_signal.index_identifiers)),
                         signal.sentiment.value,
                         pb_signal.sentiment_score,
                         pb_signal.confidence,
@@ -151,23 +212,23 @@ class CompositeSinkAdapter:
 def create_sink_from_env(data_dir: str | Path | None = None):
     """
     Factory that builds the configured SinkPort based on SINK_BACKEND:
-    - 'both' (default): CompositeSinkAdapter([SQLiteSinkAdapter, JSONLSinkAdapter])
-    - 'sqlite': SQLiteSinkAdapter
+    - 'sqlite' (default): SQLiteSinkAdapter only (compact binary relational DB)
     - 'jsonl': JSONLSinkAdapter
+    - 'both': CompositeSinkAdapter([SQLiteSinkAdapter, JSONLSinkAdapter])
     """
     base_dir = Path(data_dir or os.environ.get("SINK_DATA_DIR", "data"))
-    backend = os.environ.get("SINK_BACKEND", "both").strip().lower()
+    backend = os.environ.get("SINK_BACKEND", "sqlite").strip().lower()
 
     sqlite_path = base_dir / "market_signals.db"
     jsonl_path = base_dir / "market_signals.jsonl"
 
-    if backend == "sqlite":
-        return SQLiteSinkAdapter(db_path=sqlite_path)
+    if backend == "both":
+        return CompositeSinkAdapter(
+            [
+                SQLiteSinkAdapter(db_path=sqlite_path),
+                JSONLSinkAdapter(file_path=jsonl_path),
+            ]
+        )
     if backend == "jsonl":
         return JSONLSinkAdapter(file_path=jsonl_path)
-    return CompositeSinkAdapter(
-        [
-            SQLiteSinkAdapter(db_path=sqlite_path),
-            JSONLSinkAdapter(file_path=jsonl_path),
-        ]
-    )
+    return SQLiteSinkAdapter(db_path=sqlite_path)

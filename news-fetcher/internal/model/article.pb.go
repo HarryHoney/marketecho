@@ -224,6 +224,9 @@ type MarketSignal struct {
 	Reasoning        string                 `protobuf:"bytes,6,opt,name=reasoning,proto3" json:"reasoning,omitempty"`
 	SemanticCacheHit bool                   `protobuf:"varint,7,opt,name=semantic_cache_hit,json=semanticCacheHit,proto3" json:"semantic_cache_hit,omitempty"`
 	ProcessedAtUnix  int64                  `protobuf:"varint,8,opt,name=processed_at_unix,json=processedAtUnix,proto3" json:"processed_at_unix,omitempty"`
+	Companies        []string               `protobuf:"bytes,9,rep,name=companies,proto3" json:"companies,omitempty"`
+	IndexIdentifiers []string               `protobuf:"bytes,10,rep,name=index_identifiers,json=indexIdentifiers,proto3" json:"index_identifiers,omitempty"`
+	Sectors          []string               `protobuf:"bytes,11,rep,name=sectors,proto3" json:"sectors,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -314,6 +317,27 @@ func (x *MarketSignal) GetProcessedAtUnix() int64 {
 	return 0
 }
 
+func (x *MarketSignal) GetCompanies() []string {
+	if x != nil {
+		return x.Companies
+	}
+	return nil
+}
+
+func (x *MarketSignal) GetIndexIdentifiers() []string {
+	if x != nil {
+		return x.IndexIdentifiers
+	}
+	return nil
+}
+
+func (x *MarketSignal) GetSectors() []string {
+	if x != nil {
+		return x.Sectors
+	}
+	return nil
+}
+
 var File_article_proto protoreflect.FileDescriptor
 
 const file_article_proto_rawDesc = "" +
@@ -329,7 +353,7 @@ const file_article_proto_rawDesc = "" +
 	"\x11published_at_unix\x18\a \x01(\x03R\x0fpublishedAtUnix\x12\x19\n" +
 	"\btrace_id\x18\b \x01(\tR\atraceId\";\n" +
 	"\vArticleList\x12,\n" +
-	"\barticles\x18\x01 \x03(\v2\x10.article.ArticleR\barticles\"\xbf\x02\n" +
+	"\barticles\x18\x01 \x03(\v2\x10.article.ArticleR\barticles\"\xa4\x03\n" +
 	"\fMarketSignal\x12\x1d\n" +
 	"\n" +
 	"article_id\x18\x01 \x01(\tR\tarticleId\x12\x18\n" +
@@ -341,7 +365,11 @@ const file_article_proto_rawDesc = "" +
 	"confidence\x12\x1c\n" +
 	"\treasoning\x18\x06 \x01(\tR\treasoning\x12,\n" +
 	"\x12semantic_cache_hit\x18\a \x01(\bR\x10semanticCacheHit\x12*\n" +
-	"\x11processed_at_unix\x18\b \x01(\x03R\x0fprocessedAtUnix*7\n" +
+	"\x11processed_at_unix\x18\b \x01(\x03R\x0fprocessedAtUnix\x12\x1c\n" +
+	"\tcompanies\x18\t \x03(\tR\tcompanies\x12+\n" +
+	"\x11index_identifiers\x18\n" +
+	" \x03(\tR\x10indexIdentifiers\x12\x18\n" +
+	"\asectors\x18\v \x03(\tR\asectors*7\n" +
 	"\x0eSentimentLabel\x12\v\n" +
 	"\aNEUTRAL\x10\x00\x12\v\n" +
 	"\aBULLISH\x10\x01\x12\v\n" +

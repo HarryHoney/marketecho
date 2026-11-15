@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rarticle.proto\x12\x07\x61rticle\"\x94\x01\n\x07\x41rticle\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x0e\n\x06source\x18\x05 \x01(\t\x12\x0b\n\x03url\x18\x06 \x01(\t\x12\x19\n\x11published_at_unix\x18\x07 \x01(\x03\x12\x10\n\x08trace_id\x18\x08 \x01(\t\"1\n\x0b\x41rticleList\x12\"\n\x08\x61rticles\x18\x01 \x03(\x0b\x32\x10.article.Article\"\xd6\x01\n\x0cMarketSignal\x12\x12\n\narticle_id\x18\x01 \x01(\t\x12\x0f\n\x07tickers\x18\x02 \x03(\t\x12*\n\tsentiment\x18\x03 \x01(\x0e\x32\x17.article.SentimentLabel\x12\x17\n\x0fsentiment_score\x18\x04 \x01(\x02\x12\x12\n\nconfidence\x18\x05 \x01(\x02\x12\x11\n\treasoning\x18\x06 \x01(\t\x12\x1a\n\x12semantic_cache_hit\x18\x07 \x01(\x08\x12\x19\n\x11processed_at_unix\x18\x08 \x01(\x03*7\n\x0eSentimentLabel\x12\x0b\n\x07NEUTRAL\x10\x00\x12\x0b\n\x07\x42ULLISH\x10\x01\x12\x0b\n\x07\x42\x45\x41RISH\x10\x02\x42\x1fZ\x1d./news-fetcher/internal/modelb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rarticle.proto\x12\x07\x61rticle\"\x94\x01\n\x07\x41rticle\x12\n\n\x02id\x18\x01 \x01(\t\x12\r\n\x05title\x18\x02 \x01(\t\x12\x13\n\x0b\x64\x65scription\x18\x03 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x04 \x01(\t\x12\x0e\n\x06source\x18\x05 \x01(\t\x12\x0b\n\x03url\x18\x06 \x01(\t\x12\x19\n\x11published_at_unix\x18\x07 \x01(\x03\x12\x10\n\x08trace_id\x18\x08 \x01(\t\"1\n\x0b\x41rticleList\x12\"\n\x08\x61rticles\x18\x01 \x03(\x0b\x32\x10.article.Article\"\x95\x02\n\x0cMarketSignal\x12\x12\n\narticle_id\x18\x01 \x01(\t\x12\x0f\n\x07tickers\x18\x02 \x03(\t\x12*\n\tsentiment\x18\x03 \x01(\x0e\x32\x17.article.SentimentLabel\x12\x17\n\x0fsentiment_score\x18\x04 \x01(\x02\x12\x12\n\nconfidence\x18\x05 \x01(\x02\x12\x11\n\treasoning\x18\x06 \x01(\t\x12\x1a\n\x12semantic_cache_hit\x18\x07 \x01(\x08\x12\x19\n\x11processed_at_unix\x18\x08 \x01(\x03\x12\x11\n\tcompanies\x18\t \x03(\t\x12\x19\n\x11index_identifiers\x18\n \x03(\t\x12\x0f\n\x07sectors\x18\x0b \x03(\t*7\n\x0eSentimentLabel\x12\x0b\n\x07NEUTRAL\x10\x00\x12\x0b\n\x07\x42ULLISH\x10\x01\x12\x0b\n\x07\x42\x45\x41RISH\x10\x02\x42\x1fZ\x1d./news-fetcher/internal/modelb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,12 +32,12 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'article_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'Z\035./news-fetcher/internal/model'
-  _globals['_SENTIMENTLABEL']._serialized_start=445
-  _globals['_SENTIMENTLABEL']._serialized_end=500
+  _globals['_SENTIMENTLABEL']._serialized_start=508
+  _globals['_SENTIMENTLABEL']._serialized_end=563
   _globals['_ARTICLE']._serialized_start=27
   _globals['_ARTICLE']._serialized_end=175
   _globals['_ARTICLELIST']._serialized_start=177
   _globals['_ARTICLELIST']._serialized_end=226
   _globals['_MARKETSIGNAL']._serialized_start=229
-  _globals['_MARKETSIGNAL']._serialized_end=443
+  _globals['_MARKETSIGNAL']._serialized_end=506
 # @@protoc_insertion_point(module_scope)

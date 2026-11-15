@@ -3,16 +3,27 @@ import json
 import logging
 import os
 import sys
+import time
 import pika
 from dotenv import load_dotenv
 
 import schema.article_pb2 as article_pb2
 from consumer.domain.models import MarketSignalSchema
+from consumer.ports.cache import SemanticCachePort
 from consumer.ports.inference import InferencePort
 from consumer.ports.sink import SinkPort
 from consumer.adapters.gemini_adapter import GeminiAdapter
 from consumer.adapters.ollama_adapter import OllamaAdapter
+from consumer.adapters.redis_vector_cache import create_semantic_cache_from_env
 from consumer.adapters.sink_adapter import create_sink_from_env
+from consumer.metrics import (
+    ARTICLES_CONSUMED_TOTAL,
+    DLQ_MESSAGES_TOTAL,
+    L2_SEMANTIC_CACHE_HITS_TOTAL,
+    L2_SEMANTIC_CACHE_MISSES_TOTAL,
+    LLM_INFERENCE_DURATION_SECONDS,
+    start_metrics_server,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -126,15 +137,22 @@ def call_gemini_api(
     Retained with backward-compatible signature for existing E2E tests.
     """
     adapter = inference_adapter or create_inference_adapter(gemini_api_key)
-    return adapter.extract_signal(f"{prompt}\n\n{news_data}")
+    start_time = time.perf_counter()
+    try:
+        return adapter.extract_signal(f"{prompt}\n\n{news_data}")
+    finally:
+        LLM_INFERENCE_DURATION_SECONDS.observe(time.perf_counter() - start_time)
 
 
 def rabbit_mq_listener_setup(
     gemini_api_key: str | None = None,
     inference_adapter: InferencePort | None = None,
     sink_adapter: SinkPort | None = None,
+    semantic_cache: SemanticCachePort | None = None,
 ):
-    config_dir = os.environ.get("CONFIG_DIR", "../configs")
+    config_dir = os.environ.get("CONFIG_DIR")
+    if not config_dir:
+        config_dir = "configs" if os.path.exists("configs/rabbit_mq.json") else "../configs"
     config_path = os.path.join(config_dir, "rabbit_mq.json")
 
     with open(config_path, "r", encoding="utf-8") as f:
@@ -144,9 +162,14 @@ def rabbit_mq_listener_setup(
     dlx_name = config.get("dlx_name", DEFAULT_DLX_NAME)
     dlq_name = config.get("dlq_name", DEFAULT_DLQ_NAME)
 
-    # Initialize singleton InferencePort & SinkPort once at startup
+    # Start Prometheus /metrics HTTP server
+    start_metrics_server()
+
+    # Initialize singleton InferencePort, SemanticCachePort, and SinkPort once at startup
     active_inference = inference_adapter or create_inference_adapter(gemini_api_key)
     active_sink = sink_adapter or create_sink_from_env()
+    active_cache = semantic_cache or create_semantic_cache_from_env()
+    cache_threshold = float(os.environ.get("L2_CACHE_SIMILARITY_THRESHOLD", "0.92"))
 
     rmq_user = os.environ.get("RABBITMQ_USER", "guest")
     rmq_pass = os.environ.get("RABBITMQ_PASSWORD", "guest")
@@ -174,6 +197,7 @@ def rabbit_mq_listener_setup(
 
     def callback(ch, method, properties, body):
         print(" [x] Received a message")
+        ARTICLES_CONSUMED_TOTAL.inc()
 
         article = article_pb2.Article()
         try:
@@ -181,12 +205,14 @@ def rabbit_mq_listener_setup(
             if not article.title and not article.content:
                 raise ValueError("Empty protobuf Article payload")
         except Exception as e:
+            DLQ_MESSAGES_TOTAL.labels(reason="parse_error").inc()
             logger.error("Failed to parse protobuf message (routing to DLQ '%s'): %s", dlq_name, e)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return
 
         print(f"     Title: {article.title}")
 
+        semantic_query_text = f"{article.title}\n{article.description or article.content}".strip()
         news_data_text = (
             f"Title: {article.title}\n"
             f"Source: {article.source}\n"
@@ -195,6 +221,28 @@ def rabbit_mq_listener_setup(
         )
 
         try:
+            # 1. Check L2 Semantic Vector Cache first
+            cached_signal = active_cache.lookup(semantic_query_text, threshold=cache_threshold)
+            if cached_signal is not None:
+                L2_SEMANTIC_CACHE_HITS_TOTAL.inc()
+                pb_signal = active_sink.save(
+                    article=article,
+                    signal=cached_signal,
+                    semantic_cache_hit=True,
+                )
+                logger.info(
+                    "L2 Semantic Cache HIT for article_id=%s companies=%s tickers=%s indices=%s sentiment=%s",
+                    pb_signal.article_id,
+                    list(pb_signal.companies),
+                    list(pb_signal.tickers),
+                    list(pb_signal.index_identifiers),
+                    cached_signal.sentiment.value,
+                )
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
+
+            # 2. On L2 Cache Miss -> Call LLM
+            L2_SEMANTIC_CACHE_MISSES_TOTAL.inc()
             signal = call_gemini_api(
                 gemini_api_key or "",
                 "Extract structured market signal from the following news data:",
@@ -202,19 +250,23 @@ def rabbit_mq_listener_setup(
                 inference_adapter=active_inference,
             )
             if isinstance(signal, MarketSignalSchema):
+                active_cache.store(semantic_query_text, signal)
                 pb_signal = active_sink.save(
                     article=article,
                     signal=signal,
                     semantic_cache_hit=False,
                 )
                 logger.info(
-                    "Persisted MarketSignal for article_id=%s tickers=%s sentiment=%s score=%.2f",
+                    "Persisted MarketSignal for article_id=%s companies=%s tickers=%s indices=%s sentiment=%s score=%.2f",
                     pb_signal.article_id,
+                    list(pb_signal.companies),
                     list(pb_signal.tickers),
+                    list(pb_signal.index_identifiers),
                     signal.sentiment.value,
                     pb_signal.sentiment_score,
                 )
         except Exception as e:
+            DLQ_MESSAGES_TOTAL.labels(reason="inference_error").inc()
             logger.error("Inference/Sink failure for article '%s' (routing to DLQ): %s", article.title, e)
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
             return

@@ -33,4 +33,7 @@ message MarketSignal {
   string reasoning = 6;
   bool semantic_cache_hit = 7;
   int64 processed_at_unix = 8;
+  repeated string companies = 9;
+  repeated string index_identifiers = 10;
+  repeated string sectors = 11;
 }

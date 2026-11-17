@@ -11,7 +11,9 @@ import schema.article_pb2 as article_pb2
 from consumer.domain.models import MarketSignalSchema
 from consumer.ports.cache import SemanticCachePort
 from consumer.ports.inference import InferencePort
+from consumer.ports.notifier import NotificationPort
 from consumer.ports.sink import SinkPort
+from consumer.adapters.discord_adapter import create_notifier_from_env
 from consumer.adapters.gemini_adapter import GeminiAdapter
 from consumer.adapters.ollama_adapter import OllamaAdapter
 from consumer.adapters.redis_vector_cache import create_semantic_cache_from_env
@@ -24,6 +26,8 @@ from consumer.metrics import (
     LLM_INFERENCE_DURATION_SECONDS,
     start_metrics_server,
 )
+from evaluate_eod import start_us_market_close_scheduler
+from query_signals import resolve_db_path
 
 logging.basicConfig(
     level=logging.INFO,
@@ -149,7 +153,9 @@ def rabbit_mq_listener_setup(
     inference_adapter: InferencePort | None = None,
     sink_adapter: SinkPort | None = None,
     semantic_cache: SemanticCachePort | None = None,
+    notifier: NotificationPort | None = None,
 ):
+    _load_env()
     config_dir = os.environ.get("CONFIG_DIR")
     if not config_dir:
         config_dir = "configs" if os.path.exists("configs/rabbit_mq.json") else "../configs"
@@ -165,11 +171,16 @@ def rabbit_mq_listener_setup(
     # Start Prometheus /metrics HTTP server
     start_metrics_server()
 
-    # Initialize singleton InferencePort, SemanticCachePort, and SinkPort once at startup
+    # Initialize singleton ports once at startup
     active_inference = inference_adapter or create_inference_adapter(gemini_api_key)
     active_sink = sink_adapter or create_sink_from_env()
     active_cache = semantic_cache or create_semantic_cache_from_env()
+    active_notifier = notifier or create_notifier_from_env()
     cache_threshold = float(os.environ.get("L2_CACHE_SIMILARITY_THRESHOLD", "0.92"))
+
+    # Start automated US Market Close (16:15 ET Mon-Fri) EOD evaluation & Discord scorecard scheduler
+    if os.environ.get("ENABLE_EOD_SCHEDULER", "true").strip().lower() == "true":
+        start_us_market_close_scheduler(db_path=resolve_db_path(), notifier=active_notifier)
 
     rmq_user = os.environ.get("RABBITMQ_USER", "guest")
     rmq_pass = os.environ.get("RABBITMQ_PASSWORD", "guest")
@@ -230,6 +241,11 @@ def rabbit_mq_listener_setup(
                     signal=cached_signal,
                     semantic_cache_hit=True,
                 )
+                active_notifier.notify_signal(
+                    article=article,
+                    signal=cached_signal,
+                    semantic_cache_hit=True,
+                )
                 logger.info(
                     "L2 Semantic Cache HIT for article_id=%s companies=%s tickers=%s indices=%s sentiment=%s",
                     pb_signal.article_id,
@@ -252,6 +268,11 @@ def rabbit_mq_listener_setup(
             if isinstance(signal, MarketSignalSchema):
                 active_cache.store(semantic_query_text, signal)
                 pb_signal = active_sink.save(
+                    article=article,
+                    signal=signal,
+                    semantic_cache_hit=False,
+                )
+                active_notifier.notify_signal(
                     article=article,
                     signal=signal,
                     semantic_cache_hit=False,

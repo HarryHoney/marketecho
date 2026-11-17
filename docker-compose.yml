@@ -13,6 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis/redis-stack-server:latest
@@ -26,12 +27,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   news-fetcher:
     build:
       context: .
       dockerfile: news-fetcher/Dockerfile
     container_name: marketecho-fetcher
+    ports:
+      - "2112:2112"
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -53,6 +57,10 @@ services:
       context: .
       dockerfile: news-consumer/Dockerfile
     container_name: marketecho-consumer
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./news-consumer/data:/app/news-consumer/data
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -60,6 +68,7 @@ services:
         condition: service_healthy
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - RABBITMQ_HOST=rabbitmq
       - RABBITMQ_PORT=5672
       - RABBITMQ_USER=${RABBITMQ_USER:-guest}
@@ -67,4 +76,5 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - L2_CACHE_TTL_SECONDS=${L2_CACHE_TTL_SECONDS:-43200}
+      - ENABLE_EOD_SCHEDULER=${ENABLE_EOD_SCHEDULER:-true}
     restart: unless-stopped

@@ -1,4 +1,4 @@
-FROM golang:1.23-alpine
+FROM golang:1.25-alpine
 
 WORKDIR /app
 
@@ -10,6 +10,9 @@ WORKDIR /app/news-fetcher
 
 # Build the Go application
 RUN go build -o main .
+
+# Expose Prometheus metrics port
+EXPOSE 2112
 
 # Run the binary
 CMD ["./main"]

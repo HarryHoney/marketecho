@@ -3,29 +3,42 @@
 Phase 5: End-of-Day (EOD) Stock Performance & Signal Validation Service.
 
 Evaluates analyzed news signals stored in `market_signals.db` against actual
-End-of-Day stock/ETF/index market performance from Yahoo Finance
-and populates the EOD performance columns in SQLite.
+End-of-Day stock/ETF/index market performance from Yahoo Finance, populates
+the EOD performance columns in SQLite, and dispatches a Matched vs. Missed
+EOD Scorecard to Discord.
 
 Usage:
-  python3 news-consumer/evaluate_eod.py           # Evaluate all rows (default limit 50)
-  python3 news-consumer/evaluate_eod.py -n 10     # Evaluate latest 10 rows
-  python3 news-consumer/evaluate_eod.py --only-new
+  python3 news-consumer/evaluate_eod.py                # Evaluate & send Discord scorecard (if webhook set)
+  python3 news-consumer/evaluate_eod.py -n 20          # Evaluate latest 20 rows
+  python3 news-consumer/evaluate_eod.py --only-new     # Only evaluate unevaluated rows
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
+import logging
+import os
 import sqlite3
 import sys
+import threading
 import time
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+from dotenv import load_dotenv
+
+from consumer.adapters.discord_adapter import DiscordWebhookAdapter, create_notifier_from_env
 from consumer.adapters.market_data_adapter import (
     YahooFinanceMarketDataAdapter,
     resolve_market_symbol,
 )
 from consumer.ports.market_data import EODQuote, MarketDataPort
+from consumer.ports.notifier import NotificationPort
 from query_signals import resolve_db_path
+
+logger = logging.getLogger("eod-evaluator")
+US_EASTERN_TZ = ZoneInfo("America/New_York")
 
 
 def ensure_eod_columns(db_path: Path) -> None:
@@ -111,12 +124,14 @@ def evaluate_prediction_accuracy(
 def run_eod_evaluation(
     db_path: Path,
     market_data: MarketDataPort | None = None,
+    notifier: NotificationPort | None = None,
     limit: int = 100,
     force_all: bool = True,
 ) -> list[dict]:
     """
     Ensures the SQLite schema has the Phase 5 EOD columns, fetches EOD quotes for
-    each analyzed signal's tickers (or benchmark index), and updates the database rows.
+    each analyzed signal's tickers (or benchmark index), updates the database rows,
+    and optionally sends the EOD scorecard to Discord.
     """
     ensure_eod_columns(db_path)
 
@@ -216,10 +231,88 @@ def run_eod_evaluation(
             )
         conn.commit()
 
+    if notifier is not None and updated_records:
+        notifier.notify_eod_summary(updated_records)
+
     return updated_records
 
 
+def seconds_until_next_us_market_close(
+    now_utc: datetime.datetime | None = None,
+    close_hour_et: int = 16,
+    close_minute_et: int = 15,
+) -> float:
+    """
+    Calculates the number of seconds until the next US market close evaluation window
+    (default 16:15 America/New_York, Monday-Friday, 15 minutes after the 4:00 PM closing bell).
+    """
+    current_utc = now_utc or datetime.datetime.now(datetime.timezone.utc)
+    now_et = current_utc.astimezone(US_EASTERN_TZ)
+
+    target_et = now_et.replace(
+        hour=close_hour_et,
+        minute=close_minute_et,
+        second=0,
+        microsecond=0,
+    )
+    if now_et >= target_et:
+        target_et += datetime.timedelta(days=1)
+
+    # Skip Saturday (5) and Sunday (6)
+    while target_et.weekday() >= 5:
+        target_et += datetime.timedelta(days=1)
+
+    return max(1.0, (target_et - now_et).total_seconds())
+
+
+def start_us_market_close_scheduler(
+    db_path: Path,
+    notifier: NotificationPort | None = None,
+) -> threading.Thread:
+    """
+    Starts a background daemon thread that sleeps until 16:15 US/Eastern (Mon-Fri),
+    runs the EOD stock evaluation against all signals in SQLite, and posts the
+    Matched vs. Missed scorecard to Discord.
+    """
+    active_notifier = notifier or create_notifier_from_env()
+
+    def _scheduler_loop() -> None:
+        while True:
+            wait_sec = seconds_until_next_us_market_close()
+            next_run_et = (
+                datetime.datetime.now(datetime.timezone.utc)
+                + datetime.timedelta(seconds=wait_sec)
+            ).astimezone(US_EASTERN_TZ)
+            logger.info(
+                "Scheduled next US Market Close EOD evaluation for %s ET (in %.1f hours)",
+                next_run_et.strftime("%Y-%m-%d %H:%M:%S"),
+                wait_sec / 3600.0,
+            )
+            time.sleep(wait_sec)
+            try:
+                logger.info("US Market Close bell reached — running EOD signal evaluation...")
+                records = run_eod_evaluation(
+                    db_path=db_path,
+                    notifier=active_notifier,
+                    limit=100,
+                    force_all=False,
+                )
+                logger.info("Completed scheduled US Market Close EOD evaluation (%d signals).", len(records))
+            except Exception as exc:
+                logger.error("Scheduled EOD evaluation failed: %s", exc)
+            # Sleep 60s to avoid re-triggering within the same minute
+            time.sleep(60)
+
+    thread = threading.Thread(target=_scheduler_loop, name="us-market-close-eod", daemon=True)
+    thread.start()
+    return thread
+
+
 def main() -> None:
+    repo_env = Path(__file__).resolve().parent.parent / ".env"
+    if repo_env.exists():
+        load_dotenv(dotenv_path=repo_env, override=True)
+
     parser = argparse.ArgumentParser(
         description="Evaluate analyzed news signals against actual End-of-Day stock/index market data."
     )
@@ -236,6 +329,11 @@ def main() -> None:
         help="Only evaluate rows that have not been evaluated yet.",
     )
     parser.add_argument(
+        "--no-discord",
+        action="store_true",
+        help="Skip sending the EOD scorecard to Discord even if DISCORD_WEBHOOK_URL is set.",
+    )
+    parser.add_argument(
         "--db",
         type=str,
         default=None,
@@ -248,12 +346,23 @@ def main() -> None:
         print(f"Database not found at: {db_path}", file=sys.stderr)
         sys.exit(1)
 
+    notifier = None if args.no_discord else create_notifier_from_env()
     results = run_eod_evaluation(
         db_path=db_path,
+        notifier=notifier,
         limit=args.limit,
         force_all=not args.only_new,
     )
-    print(f"=== Evaluated {len(results)} Market Signal(s) with EOD Stock/Index Data ===\n")
+
+    matched = [r for r in results if r["prediction_outcome"] == "ACCURATE" and r["sentiment"] in ("BULLISH", "BEARISH")]
+    missed = [r for r in results if r["prediction_outcome"] == "DIVERGENT"]
+    directional_total = len(matched) + len(missed)
+    win_rate = (len(matched) / directional_total * 100.0) if directional_total > 0 else 0.0
+
+    print(
+        f"=== Evaluated {len(results)} Market Signal(s) | "
+        f"Directional Win Rate: {win_rate:.1f}% ({len(matched)} Matched / {len(missed)} Missed) ===\n"
+    )
     for item in results:
         print(f"[{item['id']}] {item['title']}")
         print(

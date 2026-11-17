@@ -207,9 +207,55 @@ make test
 
 ---
 
-## 7. Implementation Status
+## 7. Discord Real-Time Alerts & US Market Close EOD Scorecard
+
+1. **Create a Free Discord Webhook (30 seconds):**
+   - In your Discord server, go to **Channel Settings → Integrations → Webhooks → New Webhook** and click **Copy Webhook URL**.
+   - Add it to your `.env` file:
+     ```bash
+     DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/your_webhook_id/your_token"
+     ```
+2. **Real-Time Directional Alerts (`notify_signal`):**
+   - Whenever `news-consumer` extracts a **`BULLISH`** (🟢 Green Embed) or **`BEARISH`** (🔴 Red Embed) signal, it immediately posts the headline, company/scope, sector, tickers/indices, confidence, and catalyst reasoning to your Discord channel (skipping `NEUTRAL` noise).
+3. **Automated US Market Close Scorecard (`start_us_market_close_scheduler`):**
+   - Every trading day (Monday–Friday) at **4:15 PM US/Eastern (`America/New_York`)** (15 minutes after the 4:00 PM US closing bell), `news-consumer` automatically runs `evaluate_eod.py`, compares every prediction against actual Yahoo Finance EOD closing prices, updates SQLite, and posts a **📊 US Market Close EOD Scorecard** embed to Discord listing:
+     - **Directional Win Rate (%)**
+     - **✅ Matched Predictions** (where `BULLISH` closed `UP` or `BEARISH` closed `DOWN`)
+     - **❌ Missed / Divergent Predictions** (where the stock moved opposite to the signal)
+   - You can also trigger this evaluation and Discord scorecard manually anytime via:
+     ```bash
+     python3 news-consumer/evaluate_eod.py
+     ```
+
+---
+
+## 8. Zero-Cost Production Deployment on Oracle Cloud Free Tier ($0/Month Forever)
+
+1. **Provision an Always-Free ARM64 VM on Oracle Cloud (OCI):**
+   - Shape: `VM.Standard.A1.Flex` (Ubuntu 24.04 LTS, up to **4 OCPUs and 24 GB RAM** — 100% free forever).
+2. **Install Docker & Docker Compose on the VM:**
+   ```bash
+   sudo apt-get update && sudo apt-get install -y docker.io docker-compose-v2 git
+   sudo usermod -aG docker $USER && newgrp docker
+   ```
+3. **Clone Repository & Configure `.env`:**
+   ```bash
+   git clone <your-repo-url> MarketEcho && cd MarketEcho
+   cp .env.example .env
+   nano .env   # Paste GEMINI_API_KEY, NEWSDATA_API_KEY, and DISCORD_WEBHOOK_URL
+   ```
+4. **Launch the Entire Stack with Persistent SQLite Storage:**
+   ```bash
+   docker compose up -d --build
+   ```
+   - `marketecho-rabbitmq`, `marketecho-redis`, `marketecho-fetcher`, and `marketecho-consumer` all run with `restart: unless-stopped`.
+   - `./news-consumer/data` is volume-mounted into `marketecho-consumer` so `market_signals.db` persists on the VM disk across container restarts.
+
+---
+
+## 9. Implementation Status
 - [x] **Phase 1:** Repo Hygiene, Protobuf Evolution & Go Continuous Streaming (`RSSProvider` + `NewsDataIO`)
 - [x] **Phase 2:** Durable Broker Topology (`marketecho.dlx` / `news_articles_dlq`) & Redis Hybrid L1 Deduplication (`SHA-256` + `64-bit SimHash`)
 - [x] **Phase 3:** Python Hexagonal Refactor, Constrained Decoding & Pluggable LLMs (`GeminiAdapter` + `OllamaAdapter`)
 - [x] **Phase 4:** L2 Semantic Vector Cache (`FastEmbed` + Redis), Company/Sector/Index Extraction, SQLite CLI Inspector & Prometheus Observability
-- [x] **Phase 5:** End-of-Day (EOD) Stock Performance & Signal Validation Service (`MarketDataPort`, `YahooFinanceMarketDataAdapter`, `evaluate_eod.py`, and SQLite EOD evaluation columns)
+- [x] **Phase 5:** End-of-Day (EOD) Stock Performance & Signal Validation Service (`MarketDataPort`, `YahooFinanceMarketDataAdapter`, `DiscordWebhookAdapter`, US Market Close Scheduler & Oracle Cloud Free-Tier Docker Stack)
